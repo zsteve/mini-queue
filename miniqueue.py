@@ -3,11 +3,12 @@
 import sys
 import os
 import time
+import argparse
 
 ''' 
-job_dist2: simple queueing of small jobs on a large number of computer systems
+miniqueue: simple queueing of small jobs on a large number of computer systems
 
-job_dist2 [job_list] [machine_list]
+miniqueue [job_list] [machine_list]
 
 input files:
 [job_list] - a list of all input jobs to be run on systems. One line of bash command(s) per job
@@ -36,7 +37,7 @@ class Machine:
         job_str = "ssh %s '" % self.addr
         for i in job_strings:
             # concatenate all our job strings
-            job_str+=("%s > /dev/null& echo $!;" % i)
+            job_str+=("%s > /dev/null & echo $!;" % i)
         
         job_str+="'"
         pid=os.popen(job_str).read() # submit the job but don't block  
@@ -61,11 +62,16 @@ class Machine:
         # retrieve the number of completed jobs from this machine
         return len(self.pid_list) - self.get_procnum()
 
+print 'miniqueue\nUsage: miniqueue [joblist] [machinelist]\n'
+
+if len(sys.argv) != 3:
+    quit()
+
 job_list_file = sys.argv[-2]
 machine_list_file = sys.argv[-1]
 
 job_list = []
-machine_list = []
+machine_list = {}
 
 with open(job_list_file) as f:
     for i in f:
@@ -76,15 +82,23 @@ with open(machine_list_file) as f:
     for i in f:
         # get machines
         (addr, n_job_max) = i.split()
-        machine_list+=[Machine(addr, int(n_job_max))]
+        machine_list[addr] = Machine(addr, int(n_job_max))
 
 print job_list
 print machine_list
 
-num_jobs_submitted = 0
+num_jobs_submitted = 0  
 
 while True:
-    for m in machine_list:
+    # once per loop, we read the machine_list_file to update the max num of processes
+    # each machine can take. Can modify machine_list_file during runtime to increase the number
+    # of jobs (can only INCREASE)
+    with open(machine_list_file) as f:
+        for i in f:
+            (addr, n_job_max) = i.split()
+            machine_list[addr].n_max_jobs = int(n_job_max)
+
+    for addr, m in machine_list.iteritems():
         # loop through each machine and get the number of processes
         num_new_jobs = m.n_max_jobs - m.get_procnum()
         sub_jobs = []
@@ -118,7 +132,7 @@ while True:
     if len(job_list) == 0:
         # no more new jobs, so just wait for all existing jobs to finish
         print "Out of jobs! Waiting for all existing jobs to terminate..."
-        for m in machine_list:
+        for addr, m in machine_list.iteritems():
             while m.get_procnum() > 0:
                 time.sleep(1.0)
         break
